@@ -28,7 +28,7 @@ const char *format_names[NUM_FORMATS] = {
 	"xa", "xacd",
 	"spu", "spui",
 	"vag", "vagi",
-	"str2", "str2cd",
+	"str2", "str2cd", "str2v",
 	"sbs2"
 };
 
@@ -37,6 +37,7 @@ void print_help(void) {
 		"Usage:\n"
 		"    psxavenc -t <xa|xacd>     [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] <in> <out.xa>\n"
 		"    psxavenc -t <str2|str2cd> [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
+		"    psxavenc -t str2v         [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
 		"    psxavenc -t sbs2          [-s WxH] [-I] [-r num/den] [-a size] <in> <out.str>\n"
 		"    psxavenc -t <spu|vag>     [-f freq] [-L] <in> <out.vag>\n"
 		"    psxavenc -t <spui|vagi>   [-f freq] [-c 1-24] [-L] [-i size] [-a size] <in> <out.vag>\n"
@@ -53,6 +54,7 @@ void print_help(void) {
 		"                       vagi   [A.] .vag SPU-ADPCM interleaved\n"
 		"                       str2   [AV] v2 .str video, 2336-byte sectors\n"
 		"                       str2cd [AV] v2 .str video, 2352-byte sectors\n"
+		"                       str2v  [.V] v2 .str video, 2048-byte sectors\n"
 		"                       sbs2   [.V] v2 .sbs video, 2048-byte sectors\n"
 		"    -F num           Set the XA file number for xa/str2 (0-255)\n"
 		"    -C num           Set the XA channel number for xa/str2 (0-31)\n"
@@ -252,6 +254,8 @@ int parse_args(settings_t* settings, int argc, char** argv) {
 				return -1;
 			}
 			break;
+		case FORMAT_STR2V:
+			break;
 		case FORMAT_SBS2:
 			if (!settings->alignment) {
 				fprintf(stderr, "Alignment (frame size) must be specified\n");
@@ -325,9 +329,14 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	bool has_audio = (settings.format != FORMAT_SBS2);
-	bool has_video = (settings.format == FORMAT_STR2) ||
-		(settings.format == FORMAT_STR2CD) || (settings.format == FORMAT_SBS2);
+	bool has_audio =
+		(settings.format != FORMAT_STR2V) &&
+		(settings.format != FORMAT_SBS2);
+	bool has_video =
+		(settings.format == FORMAT_STR2) ||
+		(settings.format == FORMAT_STR2CD) ||
+		(settings.format == FORMAT_STR2V) ||
+		(settings.format == FORMAT_SBS2);
 
 	bool did_open_data = open_av_data(argv[arg_offset + 0], &settings,
 		has_audio, has_video, !has_video, has_video);
@@ -380,6 +389,7 @@ int main(int argc, char **argv) {
 			break;
 		case FORMAT_STR2:
 		case FORMAT_STR2CD:
+		case FORMAT_STR2V:
 			if (!settings.quiet) {
 				if (settings.decoder_state_av.audio_stream) {
 					fprintf(stderr, "Audio format: XA-ADPCM, %d Hz %d-bit %s, F=%d C=%d\n",

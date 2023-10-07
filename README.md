@@ -2,7 +2,7 @@
 # psxavenc
 
 psxavenc is an open-source command-line tool for encoding audio and video data
-into formats commonly used on the original PlayStation.
+into formats commonly used on the original PlayStation and PlayStation 2.
 
 ## Installation
 
@@ -57,6 +57,7 @@ $ psxavenc -t vagi -f 44100 -c 2 -L -i 8192 in.wav out.vag
 | `vagi`   | SPU-ADPCM        | Any      | None  | Any         |
 | `str2`   | None or XA-ADPCM | 1 or 2   | BS v2 | 2336 bytes  |
 | `str2cd` | None or XA-ADPCM | 1 or 2   | BS v2 | 2352 bytes  |
+| `str2v`  | None             |          | BS v2 | 2048 bytes  |
 | `sbs2`   | None             |          | BS v2 | Any         |
 
 Notes:
@@ -67,6 +68,9 @@ Notes:
   specified using the `-a` option (2048 bytes by default). Note that `vagi`
   files with more than 2 channels and/or alignment other than 2048 bytes are not
   standardized.
+- CD-ROM EDC and ECC data is not generated for video sectors in the `str2` and
+  `str2cd` formats, as it is dependent on the absolute location of each sector
+  on the disc.
 - The `sbs2` format (used in some System 573 games) is simply a series of
   concatenated BS v2 frames, each padded to the size specified by the `-a`
   option, with no additional headers besides the BS frame headers.

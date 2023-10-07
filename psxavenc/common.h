@@ -39,7 +39,7 @@ freely, subject to the following restrictions:
 #include <libswresample/swresample.h>
 #include <libpsxav.h>
 
-#define NUM_FORMATS 9
+#define NUM_FORMATS 10
 #define FORMAT_XA 0
 #define FORMAT_XACD 1
 #define FORMAT_SPU 2
@@ -48,7 +48,8 @@ freely, subject to the following restrictions:
 #define FORMAT_VAGI 5
 #define FORMAT_STR2 6
 #define FORMAT_STR2CD 7
-#define FORMAT_SBS2 8
+#define FORMAT_STR2V 8
+#define FORMAT_SBS2 9
 
 typedef struct {
 	int frame_index;
