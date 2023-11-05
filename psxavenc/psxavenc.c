@@ -24,19 +24,25 @@ freely, subject to the following restrictions:
 
 #include "common.h"
 
-const char *format_names[NUM_FORMATS] = {
-	"xa", "xacd", "spu", "spui", "vag", "vagi", "str2", "str2cd", "str2v", "sbs2"
+const char *format_codes[NUM_FORMATS] = {
+	"xa", "xacd", "spu", "spui", "vag", "vagi", "str", "strcd", "strv", "sbs"
+};
+const char *frame_format_codes[NUM_FRAME_FORMATS] = {
+	"v2", "v3", "v3b"
+};
+const char *frame_format_names[NUM_FRAME_FORMATS] = {
+	"BS v2", "BS v3", "BS v3 (DC wrap)"
 };
 
 void print_help(void) {
 	fprintf(stderr,
 		"Usage:\n"
-		"    psxavenc -t xa|xacd     [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] <in> <out.xa>\n"
-		"    psxavenc -t str2|str2cd [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
-		"    psxavenc -t str2v       [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
-		"    psxavenc -t sbs2        [-s WxH] [-I] [-a size] <in> <out.sbs>\n"
-		"    psxavenc -t spu|vag     [-f freq] [-L] [-a size] <in> <out.vag>\n"
-		"    psxavenc -t spui|vagi   [-f freq] [-c count] [-L] [-i size] [-a size] <in> <out.vag>\n"
+		"    psxavenc -t xa|xacd   [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] <in> <out.xa>\n"
+		"    psxavenc -t str|strcd [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] [-v v2|v3|v3b] [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
+		"    psxavenc -t strv      [-v v2|v3|v3b] [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
+		"    psxavenc -t sbs       [-v v2|v3|v3b] [-s WxH] [-I] [-a size] <in> <out.sbs>\n"
+		"    psxavenc -t spu|vag   [-f freq] [-L] [-a size] <in> <out.vag>\n"
+		"    psxavenc -t spui|vagi [-f freq] [-c count] [-L] [-i size] [-a size] <in> <out.vag>\n"
 		"\n"
 		"Tool options:\n"
 		"    -h               Show this help message and exit\n"
@@ -44,32 +50,32 @@ void print_help(void) {
 		"\n"
 		"Output options:\n"
 		"    -t format        Use specified output type\n"
-		"                       xa     [A.] XA-ADPCM, 2336-byte sectors\n"
-		"                       xacd   [A.] XA-ADPCM, 2352-byte sectors\n"
-		"                       spu    [A.] raw SPU-ADPCM mono data\n"
-		"                       spui   [A.] raw SPU-ADPCM interleaved data\n"
-		"                       vag    [A.] .vag SPU-ADPCM mono\n"
-		"                       vagi   [A.] .vag SPU-ADPCM interleaved\n"
-		"                       str2   [AV] v2 .str video, 2336-byte sectors\n"
-		"                       str2cd [AV] v2 .str video, 2352-byte sectors\n"
-		"                       str2v  [.V] v2 .str video, 2048-byte sectors\n"
-		"                       sbs2   [.V] v2 .sbs video\n"
-		"    -F num           xa/str2: Set the XA file number\n"
+		"                       xa:    [A.] XA-ADPCM, 2336-byte sectors\n"
+		"                       xacd:  [A.] XA-ADPCM, 2352-byte sectors\n"
+		"                       spu:   [A.] raw SPU-ADPCM mono data\n"
+		"                       spui:  [A.] raw SPU-ADPCM interleaved data\n"
+		"                       vag:   [A.] .vag SPU-ADPCM mono\n"
+		"                       vagi:  [A.] .vag SPU-ADPCM interleaved\n"
+		"                       str:   [AV] .str video, 2336-byte sectors\n"
+		"                       strcd: [AV] .str video, 2352-byte sectors\n"
+		"                       strv:  [.V] .str video, 2048-byte sectors\n"
+		"                       sbs:   [.V] .sbs video\n"
+		"    -F num           xa/str: Set the XA file number\n"
 		"                       0-255, default 0\n"
-		"    -C num           xa/str2: Set the XA channel number\n"
+		"    -C num           xa/str: Set the XA channel number\n"
 		"                       0-31, default 0\n"
 		"\n"
-		"Audio options (all formats except str2v/sbs2):\n"
+		"Audio options (all formats except strv/sbs):\n"
 		"    -f freq          Use specified sample rate\n"
-		"                       xa/str2:   18900 or 37800, default 37800\n"
+		"                       xa/str:    18900 or 37800, default 37800\n"
 		"                       spu/vag:   any value, default 44100\n"
 		"                       spui/vagi: any value, default 44100\n"
 		"    -b bitdepth      Use specified bit depth\n"
-		"                       xa/str2:   4 or 8, default 4\n"
+		"                       xa/str:    4 or 8, default 4\n"
 		"                       spu/vag:   must be 4\n"
 		"                       spui/vagi: must be 4\n"
 		"    -c channels      Use specified channel count\n"
-		"                       xa/str2:   1 or 2, default 2\n"
+		"                       xa/str:    1 or 2, default 2\n"
 		"                       spu/vag:   must be 1\n"
 		"                       spui/vagi: any value, default 2\n"
 		"    -R key=value,... Pass custom options to libswresample (see FFmpeg docs)\n"
@@ -84,16 +90,20 @@ void print_help(void) {
 		"                     spui/vagi: Pad header and each chunk to multiple of specified size\n"
 		"                       Any value >= 16, default 2048\n"
 		"\n"
-		"Video options (str2/str2v/sbs2 formats):\n"
+		"Video options (str/strv/sbs formats):\n"
+		"    -v format        Use specified video frame format\n"
+		"                       v2:  BS v2, default\n"
+		"                       v3:  BS v3\n"
+		"                       v3b: BS v3 with DC coefficient wrapping\n"
 		"    -s WxH           Rescale input file to fit within specified size\n"
 		"                       16x16-320x256 in 16-pixel increments, default 320x240\n"
 		"    -I               Force stretching to given size without preserving aspect ratio\n"
-		"    -r num[/den]     str2: Set frame rate to specified integer or fraction\n"
+		"    -r num[/den]     str: Set frame rate to specified integer or fraction\n"
 		"                       1-30, default 15\n"
-		"    -x speed         str2: Set the CD-ROM speed the file is meant to played at\n"
+		"    -x speed         str: Set the CD-ROM speed the file is meant to played at\n"
 		"                       1 or 2, default 2\n"
-		"    -T               str2: Place XA-ADPCM sectors after video sectors\n"
-		"    -a size          sbs2: Set the size of each frame\n"
+		"    -T               str: Place XA-ADPCM sectors after video sectors\n"
+		"    -a size          sbs: Set the size of each frame\n"
 		"                       Any value >= 256, default 8192\n"
 		"    -S key=value,... Pass custom options to libswscale (see FFmpeg docs)\n"
 		"\n"
@@ -103,7 +113,7 @@ void print_help(void) {
 int parse_args(settings_t* settings, int argc, char** argv) {
 	int c, i;
 	char *next;
-	while ((c = getopt(argc, argv, "?hqt:F:C:f:b:c:LR:i:a:s:ITS:r:x:")) != -1) {
+	while ((c = getopt(argc, argv, "?hqt:v:F:C:f:b:c:LR:i:a:s:ITS:r:x:")) != -1) {
 		switch (c) {
 			case '?':
 			case 'h': {
@@ -115,15 +125,28 @@ int parse_args(settings_t* settings, int argc, char** argv) {
 				settings->show_progress = false;
 			} break;
 			case 't': {
-				settings->format = -1;
+				settings->format = FORMAT_INVALID;
 				for (i = 0; i < NUM_FORMATS; i++) {
-					if (!strcmp(optarg, format_names[i])) {
+					if (!strcmp(optarg, format_codes[i])) {
 						settings->format = i;
 						break;
 					}
 				}
-				if (settings->format < 0) {
+				if (settings->format == FORMAT_INVALID) {
 					fprintf(stderr, "Invalid format: %s\n", optarg);
+					return -1;
+				}
+			} break;
+			case 'v': {
+				settings->frame_format = FRAME_FORMAT_INVALID;
+				for (i = 0; i < NUM_FRAME_FORMATS; i++) {
+					if (!strcmp(optarg, frame_format_codes[i])) {
+						settings->frame_format = i;
+						break;
+					}
+				}
+				if (settings->frame_format == FRAME_FORMAT_INVALID) {
+					fprintf(stderr, "Invalid frame format: %s\n", optarg);
 					return -1;
 				}
 			} break;
@@ -241,9 +264,9 @@ int parse_args(settings_t* settings, int argc, char** argv) {
 	switch (settings->format) {
 		case FORMAT_XA:
 		case FORMAT_XACD:
-		case FORMAT_STR2:
-		case FORMAT_STR2CD:
-		case FORMAT_STR2V:
+		case FORMAT_STR:
+		case FORMAT_STRCD:
+		case FORMAT_STRV:
 			if (!settings->frequency) {
 				settings->frequency = PSX_AUDIO_XA_FREQ_DOUBLE;
 			} else if (settings->frequency != PSX_AUDIO_XA_FREQ_SINGLE && settings->frequency != PSX_AUDIO_XA_FREQ_DOUBLE) {
@@ -310,7 +333,7 @@ int parse_args(settings_t* settings, int argc, char** argv) {
 				settings->alignment = 2048;
 			}
 			break;
-		case FORMAT_SBS2:
+		case FORMAT_SBS:
 			if (settings->interleave) {
 				fprintf(stderr, "Interleave cannot be specified for this format\n");
 				return -1;
@@ -322,7 +345,7 @@ int parse_args(settings_t* settings, int argc, char** argv) {
 				return -1;
 			}
 			break;
-		default:
+		case FORMAT_INVALID:
 			fprintf(stderr, "Output format must be specified\n");
 			return -1;
 	}
@@ -340,7 +363,8 @@ int main(int argc, char **argv) {
 	settings.quiet = false;
 	settings.show_progress = isatty(fileno(stderr));
 
-	settings.format = -1;
+	settings.format = FORMAT_INVALID;
+	settings.frame_format = FRAME_FORMAT_V2;
 	settings.file_number = 0;
 	settings.channel_number = 0;
 	settings.cd_speed = 2;
@@ -369,8 +393,10 @@ int main(int argc, char **argv) {
 	settings.video_frames = NULL;
 	settings.video_frame_count = 0;
 
-	settings.state_vid.huffman_encoding_map = NULL;
+	settings.state_vid.ac_huffman_map = NULL;
+	settings.state_vid.dc_huffman_map = NULL;
 	settings.state_vid.coeff_clamp_map = NULL;
+	settings.state_vid.delta_clamp_map = NULL;
 	settings.state_vid.dct_context = NULL;
 	for(int i = 0; i < 6; i++) {
 		settings.state_vid.dct_block_lists[i] = NULL;
@@ -390,13 +416,13 @@ int main(int argc, char **argv) {
 	}
 
 	bool has_audio =
-		(settings.format != FORMAT_STR2V) &&
-		(settings.format != FORMAT_SBS2);
+		(settings.format != FORMAT_STRV) &&
+		(settings.format != FORMAT_SBS);
 	bool has_video =
-		(settings.format == FORMAT_STR2) ||
-		(settings.format == FORMAT_STR2CD) ||
-		(settings.format == FORMAT_STR2V) ||
-		(settings.format == FORMAT_SBS2);
+		(settings.format == FORMAT_STR) ||
+		(settings.format == FORMAT_STRCD) ||
+		(settings.format == FORMAT_STRV) ||
+		(settings.format == FORMAT_SBS);
 
 	bool did_open_data = open_av_data(argv[arg_offset + 0], &settings,
 		has_audio, has_video, !has_video, has_video);
@@ -447,9 +473,9 @@ int main(int argc, char **argv) {
 
 			encode_file_spu_interleaved(&settings, output);
 			break;
-		case FORMAT_STR2:
-		case FORMAT_STR2CD:
-		case FORMAT_STR2V:
+		case FORMAT_STR:
+		case FORMAT_STRCD:
+		case FORMAT_STRV:
 			if (!settings.quiet) {
 				if (settings.decoder_state_av.audio_stream) {
 					fprintf(stderr, "Audio format: XA-ADPCM, %d Hz %d-bit %s, F=%d C=%d\n",
@@ -458,7 +484,8 @@ int main(int argc, char **argv) {
 						settings.file_number, settings.channel_number
 					);
 				}
-				fprintf(stderr, "Video format: BS v2, %dx%d, %.2f fps\n",
+				fprintf(stderr, "Video format: %s, %dx%d, %.2f fps\n",
+					frame_format_names[settings.frame_format],
 					settings.video_width, settings.video_height,
 					(double)settings.video_fps_num / (double)settings.video_fps_den
 				);
@@ -466,15 +493,18 @@ int main(int argc, char **argv) {
 
 			encode_file_str(&settings, output);
 			break;
-		case FORMAT_SBS2:
+		case FORMAT_SBS:
 			if (!settings.quiet) {
-				fprintf(stderr, "Video format: BS v2, %dx%d, %.2f fps\n",
+				fprintf(stderr, "Video format: %s, %dx%d, %.2f fps\n",
+					frame_format_names[settings.frame_format],
 					settings.video_width, settings.video_height,
 					(double)settings.video_fps_num / (double)settings.video_fps_den
 				);
 			}
 
 			encode_file_sbs(&settings, output);
+			break;
+		case FORMAT_INVALID:
 			break;
 	}
 

@@ -47,7 +47,7 @@ static psx_audio_xa_settings_t settings_to_libpsxav_xa_audio(settings_t *setting
 
 	switch (settings->format) {
 		case FORMAT_XA:
-		case FORMAT_STR2:
+		case FORMAT_STR:
 			new_settings.format = PSX_AUDIO_XA_FORMAT_XA;
 			break;
 		default:
@@ -271,7 +271,7 @@ void encode_file_str(settings_t *settings, FILE *output) {
 	uint8_t buffer[2352];
 
 	int sector_size;
-	if (settings->format == FORMAT_STR2V) {
+	if (settings->format == FORMAT_STRV) {
 		sector_size = 2048;
 	} else {
 		sector_size = psx_audio_xa_get_buffer_size_per_sector(xa_settings);
@@ -350,7 +350,7 @@ void encode_file_str(settings_t *settings, FILE *output) {
 			retire_av_data(settings, samples_length*settings->channels, 0);
 		}
 
-		if (settings->format == FORMAT_STR2CD) {
+		if (settings->format == FORMAT_STRCD) {
 			int t = j + 75*2;
 
 			// Put the time in

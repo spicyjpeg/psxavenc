@@ -41,16 +41,28 @@ freely, subject to the following restrictions:
 #include <libpsxav.h>
 
 #define NUM_FORMATS 10
-#define FORMAT_XA 0
-#define FORMAT_XACD 1
-#define FORMAT_SPU 2
-#define FORMAT_SPUI 3
-#define FORMAT_VAG 4
-#define FORMAT_VAGI 5
-#define FORMAT_STR2 6
-#define FORMAT_STR2CD 7
-#define FORMAT_STR2V 8
-#define FORMAT_SBS2 9
+#define NUM_FRAME_FORMATS 3
+
+typedef enum {
+	FORMAT_XA,
+	FORMAT_XACD,
+	FORMAT_SPU,
+	FORMAT_SPUI,
+	FORMAT_VAG,
+	FORMAT_VAGI,
+	FORMAT_STR,
+	FORMAT_STRCD,
+	FORMAT_STRV,
+	FORMAT_SBS,
+	FORMAT_INVALID
+} format_t;
+
+typedef enum {
+	FRAME_FORMAT_V2,
+	FRAME_FORMAT_V3,
+	FRAME_FORMAT_V3B,
+	FRAME_FORMAT_INVALID
+} frame_format_t;
 
 typedef struct {
 	int frame_index;
@@ -59,6 +71,8 @@ typedef struct {
 	int frame_block_base_overflow;
 	int frame_block_overflow_num;
 	int frame_block_overflow_den;
+	int block_type;
+	int16_t last_dc_values[3];
 	uint16_t bits_value;
 	int bits_left;
 	uint8_t *frame_output;
@@ -68,8 +82,10 @@ typedef struct {
 	int quant_scale;
 	int quant_scale_sum;
 
-	uint32_t *huffman_encoding_map;
+	uint32_t *ac_huffman_map;
+	uint32_t *dc_huffman_map;
 	int16_t *coeff_clamp_map;
+	int16_t *delta_clamp_map;
 	int16_t *dct_block_lists[6];
 	AVDCT *dct_context;
 } vid_encoder_state_t;
@@ -96,7 +112,9 @@ typedef struct {
 	bool quiet;
 	bool show_progress;
 
-	int format; // FORMAT_*
+	format_t format;
+	frame_format_t frame_format;
+
 	int channels;
 	int cd_speed; // 1 or 2
 	int frequency; // 18900 or 37800 Hz
