@@ -24,14 +24,13 @@ freely, subject to the following restrictions:
 #include "common.h"
 
 void init_sector_buffer_video(uint8_t *buffer, settings_t *settings) {
-	int offset;
+	int offset = 0;
 	switch (settings->format) {
 		case FORMAT_STR2V:
 			memset(buffer, 0, 2048);
 			return;
 		case FORMAT_STR2:
 			memset(buffer, 0, 2336);
-			offset = 0;
 			break;
 		case FORMAT_STR2CD:
 			memset(buffer, 0, 2352);

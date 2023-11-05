@@ -321,7 +321,14 @@ void encode_file_str(settings_t *settings, FILE *output) {
 	for (int j = 0; !settings->end_of_input || settings->state_vid.frame_data_offset < settings->state_vid.frame_max_size; j++) {
 		ensure_av_data(settings, audio_samples_per_sector*settings->channels, frames_needed);
 
-		if ((j%interleave) < video_sectors_per_block) {
+		bool is_video_sector;
+		if (settings->trailing_audio) {
+			is_video_sector = (j%interleave) < video_sectors_per_block;
+		} else {
+			is_video_sector = (j%interleave) >= (interleave-video_sectors_per_block);
+		}
+
+		if (is_video_sector) {
 			// Video sector
 			init_sector_buffer_video(buffer, settings);
 			encode_sector_str(settings->video_frames, buffer, settings);
@@ -354,7 +361,7 @@ void encode_file_str(settings_t *settings, FILE *output) {
 			// FIXME: EDC is not calculated in 2336-byte sector mode (shouldn't
 			// matter anyway, any CD image builder will have to recalculate it
 			// due to the sector's MSF changing)
-			if((j%interleave) < video_sectors_per_block) {
+			if (is_video_sector) {
 				calculate_edc_data(buffer);
 			}
 		}

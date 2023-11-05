@@ -112,6 +112,7 @@ typedef struct {
 	int video_fps_num; // FPS numerator
 	int video_fps_den; // FPS denominator
 	bool ignore_aspect_ratio;
+	bool trailing_audio;
 
 	char *swresample_options;
 	char *swscale_options;

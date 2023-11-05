@@ -34,7 +34,7 @@ void print_help(void) {
 		"    psxavenc -t xa|xacd     [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] <in> <out.xa>\n"
 		"    psxavenc -t str2|str2cd [-f 18900|37800] [-b 4|8] [-c 1|2] [-F 0-255] [-C 0-31] [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
 		"    psxavenc -t str2v       [-s WxH] [-I] [-r num/den] [-x 1|2] <in> <out.str>\n"
-		"    psxavenc -t sbs2        [-s WxH] [-I] [-r num/den] [-a size] <in> <out.sbs>\n"
+		"    psxavenc -t sbs2        [-s WxH] [-I] [-a size] <in> <out.sbs>\n"
 		"    psxavenc -t spu|vag     [-f freq] [-L] [-a size] <in> <out.vag>\n"
 		"    psxavenc -t spui|vagi   [-f freq] [-c count] [-L] [-i size] [-a size] <in> <out.vag>\n"
 		"\n"
@@ -88,10 +88,11 @@ void print_help(void) {
 		"    -s WxH           Rescale input file to fit within specified size\n"
 		"                       16x16-320x256 in 16-pixel increments, default 320x240\n"
 		"    -I               Force stretching to given size without preserving aspect ratio\n"
-		"    -r num[/den]     Set frame rate to specified integer or fraction\n"
+		"    -r num[/den]     str2: Set frame rate to specified integer or fraction\n"
 		"                       1-30, default 15\n"
 		"    -x speed         str2: Set the CD-ROM speed the file is meant to played at\n"
 		"                       1 or 2, default 2\n"
+		"    -T               str2: Place XA-ADPCM sectors after video sectors\n"
 		"    -a size          sbs2: Set the size of each frame\n"
 		"                       Any value >= 256, default 8192\n"
 		"    -S key=value,... Pass custom options to libswscale (see FFmpeg docs)\n"
@@ -102,7 +103,7 @@ void print_help(void) {
 int parse_args(settings_t* settings, int argc, char** argv) {
 	int c, i;
 	char *next;
-	while ((c = getopt(argc, argv, "?hqt:F:C:f:b:c:LR:i:a:s:IS:r:x:")) != -1) {
+	while ((c = getopt(argc, argv, "?hqt:F:C:f:b:c:LR:i:a:s:ITS:r:x:")) != -1) {
 		switch (c) {
 			case '?':
 			case 'h': {
@@ -200,6 +201,9 @@ int parse_args(settings_t* settings, int argc, char** argv) {
 			} break;
 			case 'I': {
 				settings->ignore_aspect_ratio = true;
+			} break;
+			case 'T': {
+				settings->trailing_audio = true;
 			} break;
 			case 'S': {
 				settings->swscale_options = optarg;
@@ -355,6 +359,7 @@ int main(int argc, char **argv) {
 	settings.video_fps_num = 15;
 	settings.video_fps_den = 1;
 	settings.ignore_aspect_ratio = false;
+	settings.trailing_audio = false;
 
 	settings.swresample_options = NULL;
 	settings.swscale_options = NULL;
