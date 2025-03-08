@@ -3,7 +3,7 @@ psxavenc: MDEC video + SPU/XA-ADPCM audio encoder frontend
 
 Copyright (c) 2019, 2020 Adrian "asie" Siekierka
 Copyright (c) 2019 Ben "GreaseMonkey" Russell
-Copyright (c) 2023 spicyjpeg
+Copyright (c) 2023, 2025 spicyjpeg
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -24,6 +24,7 @@ freely, subject to the following restrictions:
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,14 @@ freely, subject to the following restrictions:
 #include <libswscale/swscale.h>
 #include "args.h"
 #include "decoding.h"
+#include "ringbuf.h"
+
+#define BUFFERED_AUDIO_SAMPLES 0x4000
+#define BUFFERED_VIDEO_FRAMES  0x20
+
+// Each audio packet in the input stream can have up to 4096 samples after
+// resampling.
+#define RESAMPLE_BUFFER_SIZE 0x1000
 
 static bool decode_frame(AVCodecContext *codec, AVFrame *frame, int *frame_size, AVPacket *packet) {
 	if (packet != NULL) {
@@ -55,10 +64,8 @@ static bool decode_frame(AVCodecContext *codec, AVFrame *frame, int *frame_size,
 }
 
 bool open_av_data(decoder_t *decoder, const args_t *args, int flags) {
-	decoder->audio_samples = NULL;
-	decoder->audio_sample_count = 0;
-	decoder->video_frames = NULL;
-	decoder->video_frame_count = 0;
+	init_ring_buffer(&(decoder->audio_samples), 1, 0);
+	init_ring_buffer(&(decoder->video_frames), 1, 0);
 
 	decoder->video_width = args->video_width;
 	decoder->video_height = args->video_height;
@@ -70,7 +77,6 @@ bool open_av_data(decoder_t *decoder, const args_t *args, int flags) {
 
 	av->video_next_pts = 0.0;
 	av->frame = NULL;
-	av->video_frame_dst_size = 0;
 	av->audio_stream_index = -1;
 	av->video_stream_index = -1;
 	av->format = NULL;
@@ -80,6 +86,7 @@ bool open_av_data(decoder_t *decoder, const args_t *args, int flags) {
 	av->video_codec_context = NULL;
 	av->resampler = NULL;
 	av->scaler = NULL;
+	av->resample_buffer = NULL;
 
 	if (args->flags & FLAG_QUIET)
 		av_log_set_level(AV_LOG_QUIET);
@@ -157,8 +164,6 @@ bool open_av_data(decoder_t *decoder, const args_t *args, int flags) {
 				fprintf(stderr, "Warning: input file has less than %d channels\n", args->audio_channels);
 		}
 
-		av->sample_count_mul = args->audio_channels;
-
 		if (swr_alloc_set_opts2(
 			&av->resampler,
 			&layout,
@@ -178,6 +183,10 @@ bool open_av_data(decoder_t *decoder, const args_t *args, int flags) {
 		}
 		if (swr_init(av->resampler) < 0)
 			return false;
+
+		init_ring_buffer(&(decoder->audio_samples), args->audio_channels * sizeof(int16_t), BUFFERED_AUDIO_SAMPLES);
+
+		av->resample_buffer = malloc(args->audio_channels * sizeof(int16_t) * RESAMPLE_BUFFER_SIZE);
 	}
 
 	if (av->video_stream != NULL) {
@@ -242,7 +251,8 @@ bool open_av_data(decoder_t *decoder, const args_t *args, int flags) {
 				return false;
 		}
 
-		av->video_frame_dst_size = 3 * decoder->video_width * decoder->video_height / 2;
+		// 1 full-resolution Y plane + 2 interleaved 1/4 resolution Cr/Cb planes
+		init_ring_buffer(&(decoder->video_frames), decoder->video_width * decoder->video_height * 3 / 2, BUFFERED_VIDEO_FRAMES);
 	}
 
 	av->frame = av_frame_alloc();
@@ -261,104 +271,97 @@ static void poll_av_packet_audio(decoder_t *decoder, AVPacket *packet) {
 	if (!decode_frame(av->audio_codec_context, av->frame, &frame_size, packet))
 		return;
 
-	int frame_sample_count = swr_get_out_samples(av->resampler, av->frame->nb_samples);
+	int sample_count = swr_get_out_samples(av->resampler, av->frame->nb_samples);
 
-	if (frame_sample_count == 0)
+	if (sample_count == 0)
 		return;
 
-	size_t buffer_size = sizeof(int16_t) * av->sample_count_mul * frame_sample_count;
-	uint8_t *buffer = malloc(buffer_size);
-	memset(buffer, 0, buffer_size);
+	assert(sample_count <= RESAMPLE_BUFFER_SIZE);
 
-	frame_sample_count = swr_convert(
+	uint8_t *ptr = (uint8_t *)av->resample_buffer;
+	sample_count = swr_convert(
 		av->resampler,
-		&buffer,
-		frame_sample_count,
-		(const uint8_t**)av->frame->data,
+		&ptr,
+		sample_count,
+		(const uint8_t **)av->frame->data,
 		av->frame->nb_samples
 	);
 
-	decoder->audio_samples = realloc(
-		decoder->audio_samples,
-		(decoder->audio_sample_count + ((frame_sample_count + 4032) * av->sample_count_mul)) * sizeof(int16_t)
-	);
-	memmove(
-		&(decoder->audio_samples[decoder->audio_sample_count]),
-		buffer,
-		sizeof(int16_t) * frame_sample_count * av->sample_count_mul
-	);
-	decoder->audio_sample_count += frame_sample_count * av->sample_count_mul;
-	free(buffer);
+	// Copy as many contiguous samples as possible at a time into the FIFO.
+	while (sample_count > 0) {
+		void *span = ring_buffer_get_tail(&(decoder->audio_samples), 0);
+		int span_count = ring_buffer_get_contiguous_span(&(decoder->audio_samples));
+
+		if (span_count > sample_count)
+			span_count = sample_count;
+
+		memcpy(span, ptr, decoder->audio_samples.item_size * span_count);
+		ring_buffer_append(&(decoder->audio_samples), span_count);
+		ptr += decoder->audio_samples.item_size * span_count;
+		sample_count -= span_count;
+	}
 }
 
 static void poll_av_packet_video(decoder_t *decoder, AVPacket *packet) {
 	decoder_state_t *av = &(decoder->state);
-
 	int frame_size;
-	double pts_step = (double)decoder->video_fps_den / (double)decoder->video_fps_num;
-
-	int plane_size = decoder->video_width * decoder->video_height;
-	int dst_strides[2] = {
-		decoder->video_width, decoder->video_width
-	};
 
 	if (!decode_frame(av->video_codec_context, av->frame, &frame_size, packet))
 		return;
 	if (!av->frame->width || !av->frame->height || !av->frame->data[0])
 		return;
 
+	double frame_time = (double)decoder->video_fps_den / (double)decoder->video_fps_num;
+	double pts = (double)av->frame->pts * (double)av->video_stream->time_base.num / (double)av->video_stream->time_base.den;
+
+#if 0
 	// Some files seem to have timestamps starting from a negative value
 	// (but otherwise valid) for whatever reason.
-	double pts =
-		((double)av->frame->pts * (double)av->video_stream->time_base.num)
-		/ av->video_stream->time_base.den;
-#if 0
 	if (pts < 0.0)
 		return;
 #endif
-	if (decoder->video_frame_count >= 1 && pts < av->video_next_pts)
-		return;
-	if (decoder->video_frame_count < 1)
+
+	// Drop frames if the frame rate of the input stream is higher than the
+	// target frame rate (but do not drop the first frame).
+	if (decoder->video_frames.count == 0)
 		av->video_next_pts = pts;
-	else
-		av->video_next_pts += pts_step;
+	else if (pts < av->video_next_pts)
+		return;
 
-	//fprintf(stderr, "%d %f %f %f\n", decoder->video_frame_count, pts, av->video_next_pts, pts_step);
+	//fprintf(stderr, "%d %f %f %f\n", decoder->video_frames.count, pts, av->video_next_pts, frame_time);
 
-	// Insert duplicate frames if the frame rate of the input stream is
-	// lower than the target frame rate.
-	int dupe_frames = (int) ceil((pts - av->video_next_pts) / pts_step);
-	if (dupe_frames < 0) dupe_frames = 0;
-	decoder->video_frames = realloc(
-		decoder->video_frames,
-		(decoder->video_frame_count + dupe_frames + 1) * av->video_frame_dst_size
-	);
+	// Insert duplicate frames if the frame rate of the input stream is lower
+	// than the target frame rate.
+	while ((av->video_next_pts + frame_time) < pts) {
+		const void *last_frame = ring_buffer_get_tail(&(decoder->video_frames), 1);
+		void *dupe_frame = ring_buffer_get_tail(&(decoder->video_frames), 0);
 
-	for (; dupe_frames; dupe_frames--) {
-		memcpy(
-			(decoder->video_frames) + av->video_frame_dst_size * decoder->video_frame_count,
-			(decoder->video_frames) + av->video_frame_dst_size * (decoder->video_frame_count - 1),
-			av->video_frame_dst_size
-		);
-		decoder->video_frame_count += 1;
-		av->video_next_pts += pts_step;
+		assert(last_frame != NULL);
+		memcpy(dupe_frame, last_frame, decoder->video_frames.item_size);
+		ring_buffer_append(&(decoder->video_frames), 1);
+		av->video_next_pts += frame_time;
 	}
 
-	uint8_t *dst_frame = decoder->video_frames + av->video_frame_dst_size * decoder->video_frame_count;
+	void *new_frame = ring_buffer_get_tail(&(decoder->video_frames), 0);
+	int plane_size = decoder->video_width * decoder->video_height;
 	uint8_t *dst_pointers[2] = {
-		dst_frame, dst_frame + plane_size
+		(uint8_t *)new_frame, (uint8_t *)new_frame + plane_size
 	};
+	int dst_strides[2] = {
+		decoder->video_width, decoder->video_width
+	};
+
 	sws_scale(
 		av->scaler,
-		(const uint8_t *const *) av->frame->data,
+		(const uint8_t *const *)av->frame->data,
 		av->frame->linesize,
 		0,
 		av->frame->height,
 		dst_pointers,
 		dst_strides
 	);
-
-	decoder->video_frame_count += 1;
+	ring_buffer_append(&(decoder->video_frames), 1);
+	av->video_next_pts += frame_time;
 }
 
 bool poll_av_data(decoder_t *decoder) {
@@ -378,13 +381,20 @@ bool poll_av_data(decoder_t *decoder) {
 		av_packet_unref(&packet);
 		return true;
 	} else {
+#if 0
 		// out is always padded out with 4032 "0" samples, this makes calculations elsewhere easier
-		if (av->audio_stream)
-			memset(
-				decoder->audio_samples + decoder->audio_sample_count,
-				0,
-				4032 * av->sample_count_mul * sizeof(int16_t)
-			);
+		for (int i = 4032; i > 0;) {
+			void *span = ring_buffer_get_tail(&(decoder->audio_samples), 0);
+			int span_count = ring_buffer_get_contiguous_span(&(decoder->audio_samples));
+
+			if (span_count > i)
+				span_count = i;
+
+			memset(span, 0, decoder->audio_samples.item_size * span_count);
+			ring_buffer_append(&(decoder->audio_samples), span_count);
+			i -= span_count;
+		}
+#endif
 
 		decoder->end_of_input = true;
 		return false;
@@ -395,51 +405,27 @@ bool ensure_av_data(decoder_t *decoder, int needed_audio_samples, int needed_vid
 	// HACK: in order to update decoder->end_of_input as soon as all data has
 	// been read from the input file, this loop waits for more data than
 	// strictly needed.
-#if 0
-	while (decoder->audio_sample_count < needed_audio_samples || decoder->video_frame_count < needed_video_frames) {
-#else
 	while (
-		(needed_audio_samples && decoder->audio_sample_count <= needed_audio_samples) ||
-		(needed_video_frames && decoder->video_frame_count <= needed_video_frames)
-	) {
+#if 0
+		decoder->audio_samples.count < needed_audio_samples ||
+		decoder->video_frames.count < needed_video_frames
+#else
+		(needed_audio_samples && decoder->audio_samples.count <= needed_audio_samples) ||
+		(needed_video_frames && decoder->video_frames.count <= needed_video_frames)
 #endif
-		//fprintf(stderr, "ensure %d -> %d, %d -> %d\n", decoder->audio_sample_count, needed_audio_samples, decoder->video_frame_count, needed_video_frames);
+	) {
+		//fprintf(stderr, "ensure %d -> %d, %d -> %d\n", decoder->audio_samples.count, needed_audio_samples, decoder->video_frames.count, needed_video_frames);
 		if (!poll_av_data(decoder)) {
 			// Keep returning true even if the end of the input file has been
 			// reached, if the buffer is not yet completely empty.
 			return
-				(decoder->audio_sample_count || !needed_audio_samples) &&
-				(decoder->video_frame_count || !needed_video_frames);
+				(decoder->audio_samples.count > 0 || !needed_audio_samples) &&
+				(decoder->video_frames.count > 0 || !needed_video_frames);
 		}
 	}
-	//fprintf(stderr, "ensure %d -> %d, %d -> %d\n", decoder->audio_sample_count, needed_audio_samples, decoder->video_frame_count, needed_video_frames);
+	//fprintf(stderr, "ensure %d -> %d, %d -> %d\n", decoder->audio_samples.count, needed_audio_samples, decoder->video_frames.count, needed_video_frames);
 
 	return true;
-}
-
-void retire_av_data(decoder_t *decoder, int retired_audio_samples, int retired_video_frames) {
-	//fprintf(stderr, "retire %d -> %d, %d -> %d\n", decoder->audio_sample_count, retired_audio_samples, decoder->video_frame_count, retired_video_frames);
-	assert(retired_audio_samples <= decoder->audio_sample_count);
-	assert(retired_video_frames <= decoder->video_frame_count);
-
-	int sample_size = sizeof(int16_t);
-	int frame_size = decoder->state.video_frame_dst_size;
-
-	if (decoder->audio_sample_count > retired_audio_samples)
-		memmove(
-			decoder->audio_samples,
-			decoder->audio_samples + retired_audio_samples,
-			(decoder->audio_sample_count - retired_audio_samples) * sample_size
-		);
-	if (decoder->video_frame_count > retired_video_frames)
-		memmove(
-			decoder->video_frames,
-			decoder->video_frames + retired_video_frames * frame_size,
-			(decoder->video_frame_count - retired_video_frames) * frame_size
-		);
-
-	decoder->audio_sample_count -= retired_audio_samples;
-	decoder->video_frame_count -= retired_video_frames;
 }
 
 void close_av_data(decoder_t *decoder) {
@@ -451,13 +437,8 @@ void close_av_data(decoder_t *decoder) {
 	avcodec_close(av->audio_codec_context);
 	avcodec_free_context(&(av->audio_codec_context));
 	avformat_free_context(av->format);
+	free(av->resample_buffer);
 
-	if(decoder->audio_samples != NULL) {
-		free(decoder->audio_samples);
-		decoder->audio_samples = NULL;
-	}
-	if(decoder->video_frames != NULL) {
-		free(decoder->video_frames);
-		decoder->video_frames = NULL;
-	}
+	destroy_ring_buffer(&(decoder->audio_samples));
+	destroy_ring_buffer(&(decoder->video_frames));
 }

@@ -31,6 +31,7 @@ freely, subject to the following restrictions:
 #include "args.h"
 #include "decoding.h"
 #include "mdec.h"
+#include "ringbuf.h"
 
 static time_t start_time = 0;
 static time_t last_progress_update = 0;
@@ -160,16 +161,18 @@ void encode_file_xa(const args_t *args, decoder_t *decoder, FILE *output) {
 	int sector_count = 0;
 
 	for (; ensure_av_data(decoder, audio_samples_per_sector * args->audio_channels, 0); sector_count++) {
-		int samples_length = decoder->audio_sample_count / args->audio_channels;
+		int samples_length = decoder->audio_samples.count / args->audio_channels;
 
 		if (samples_length > audio_samples_per_sector)
 			samples_length = audio_samples_per_sector;
 
 		uint8_t sector[PSX_CDROM_SECTOR_SIZE];
+
+		const void *audio_samples = ring_buffer_get_head(&(decoder->audio_samples), 0);
 		int length = psx_audio_xa_encode(
 			xa_settings,
 			&audio_state,
-			decoder->audio_samples,
+			(const int16_t *)audio_samples,
 			samples_length,
 			sector_count,
 			sector
@@ -178,7 +181,7 @@ void encode_file_xa(const args_t *args, decoder_t *decoder, FILE *output) {
 		if (decoder->end_of_input)
 			psx_audio_xa_encode_finalize(xa_settings, sector, length);
 
-		retire_av_data(decoder, samples_length * args->audio_channels, 0);
+		ring_buffer_remove(&(decoder->audio_samples), samples_length * args->audio_channels);
 		fwrite(sector, length, 1, output);
 
 		time_t t = get_elapsed_time();
@@ -220,14 +223,15 @@ void encode_file_spu(const args_t *args, decoder_t *decoder, FILE *output) {
 		loop_start_block = block_count + (args->audio_loop_point * args->audio_frequency) / (PSX_AUDIO_SPU_SAMPLES_PER_BLOCK * 1000);
 
 	for (; ensure_av_data(decoder, PSX_AUDIO_SPU_SAMPLES_PER_BLOCK, 0); block_count++) {
-		int samples_length = decoder->audio_sample_count;
+		int samples_length = decoder->audio_samples.count;
 
 		if (samples_length > PSX_AUDIO_SPU_SAMPLES_PER_BLOCK)
 			samples_length = PSX_AUDIO_SPU_SAMPLES_PER_BLOCK;
 
+		const void *audio_samples = ring_buffer_get_head(&(decoder->audio_samples), 0);
 		int length = psx_audio_spu_encode(
 			&audio_state,
-			decoder->audio_samples,
+			(const int16_t *)audio_samples,
 			samples_length,
 			1,
 			block
@@ -238,7 +242,7 @@ void encode_file_spu(const args_t *args, decoder_t *decoder, FILE *output) {
 		if ((args->flags & FLAG_SPU_LOOP_END) && decoder->end_of_input)
 			block[1] |= PSX_AUDIO_SPU_LOOP_REPEAT;
 
-		retire_av_data(decoder, samples_length, 0);
+		ring_buffer_remove(&(decoder->audio_samples), samples_length);
 		fwrite(block, length, 1, output);
 
 		time_t t = get_elapsed_time();
@@ -300,7 +304,7 @@ void encode_file_spui(const args_t *args, decoder_t *decoder, FILE *output) {
 	int chunk_count = 0;
 
 	for (; ensure_av_data(decoder, audio_samples_per_chunk * args->audio_channels, 0); chunk_count++) {
-		int samples_length = decoder->audio_sample_count / args->audio_channels;
+		int samples_length = decoder->audio_samples.count / args->audio_channels;
 
 		if (samples_length > audio_samples_per_chunk)
 			samples_length = audio_samples_per_chunk;
@@ -314,10 +318,12 @@ void encode_file_spui(const args_t *args, decoder_t *decoder, FILE *output) {
 			samples_length -= PSX_AUDIO_SPU_SAMPLES_PER_BLOCK;
 		}
 
+		const void *audio_samples = ring_buffer_get_head(&(decoder->audio_samples), 0);
+
 		for (int ch = 0; ch < args->audio_channels; ch++, chunk_ptr += args->audio_interleave) {
 			int length = psx_audio_spu_encode(
 				audio_state + ch,
-				decoder->audio_samples + ch,
+				(const int16_t *)audio_samples + ch,
 				samples_length,
 				args->audio_channels,
 				chunk_ptr
@@ -338,7 +344,7 @@ void encode_file_spui(const args_t *args, decoder_t *decoder, FILE *output) {
 			}
 		}
 
-		retire_av_data(decoder, samples_length * args->audio_channels, 0);
+		ring_buffer_remove(&(decoder->audio_samples), samples_length * args->audio_channels);
 		fwrite(chunk, chunk_size, 1, output);
 
 		time_t t = get_elapsed_time();
@@ -443,18 +449,20 @@ void encode_file_str(const args_t *args, decoder_t *decoder, FILE *output) {
 		if (is_video_sector) {
 			init_sector_buffer_video(args, sector, sector_count);
 
+			const void *video_frames = ring_buffer_get_head(&(decoder->video_frames), 0);
 			int frames_used = encode_sector_str(
 				&encoder,
 				args->format,
 				args->str_video_id,
-				decoder->video_frames,
+				(const uint8_t *)video_frames,
 				sector
 			);
+			assert(frames_used <= 1);
 
 			psx_cdrom_calculate_checksums((psx_cdrom_sector_t *)sector, PSX_CDROM_SECTOR_TYPE_MODE2_FORM1);
-			retire_av_data(decoder, 0, frames_used);
+			ring_buffer_remove(&(decoder->video_frames), frames_used);
 		} else {
-			int samples_length = decoder->audio_sample_count / args->audio_channels;
+			int samples_length = decoder->audio_samples.count / args->audio_channels;
 
 			if (samples_length > audio_samples_per_sector)
 				samples_length = audio_samples_per_sector;
@@ -464,10 +472,11 @@ void encode_file_str(const args_t *args, decoder_t *decoder, FILE *output) {
 			if (!samples_length)
 				video_sectors_per_block++;
 
+			const void *audio_samples = ring_buffer_get_head(&(decoder->audio_samples), 0);
 			int length = psx_audio_xa_encode(
 				xa_settings,
 				&audio_state,
-				decoder->audio_samples,
+				(const int16_t *)audio_samples,
 				samples_length,
 				sector_count,
 				sector
@@ -476,7 +485,7 @@ void encode_file_str(const args_t *args, decoder_t *decoder, FILE *output) {
 			if (decoder->end_of_input)
 				psx_audio_xa_encode_finalize(xa_settings, sector, length);
 
-			retire_av_data(decoder, samples_length * args->audio_channels, 0);
+			ring_buffer_remove(&(decoder->audio_samples), samples_length * args->audio_channels);
 		}
 
 		fwrite(sector, sector_size, 1, output);
@@ -565,17 +574,19 @@ void encode_file_strspu(const args_t *args, decoder_t *decoder, FILE *output) {
 		if (is_video_sector) {
 			init_sector_buffer_video(args, sector, sector_count);
 
+			const void *video_frames = ring_buffer_get_head(&(decoder->video_frames), 0);
 			int frames_used = encode_sector_str(
 				&encoder,
 				args->format,
 				args->str_video_id,
-				decoder->video_frames,
+				(const uint8_t *)video_frames,
 				sector
 			);
+			assert(frames_used <= 1);
 
-			retire_av_data(decoder, 0, frames_used);
+			ring_buffer_remove(&(decoder->video_frames), frames_used);
 		} else {
-			int samples_length = decoder->audio_sample_count / args->audio_channels;
+			int samples_length = decoder->audio_samples.count / args->audio_channels;
 
 			if (samples_length > audio_samples_per_sector)
 				samples_length = audio_samples_per_sector;
@@ -587,7 +598,7 @@ void encode_file_strspu(const args_t *args, decoder_t *decoder, FILE *output) {
 
 			assert(false); // TODO: implement
 
-			retire_av_data(decoder, samples_length * args->audio_channels, 0);
+			ring_buffer_remove(&(decoder->audio_samples), samples_length * args->audio_channels);
 		}
 
 		fwrite(sector, 2048, 1, output);
@@ -620,9 +631,10 @@ void encode_file_sbs(const args_t *args, decoder_t *decoder, FILE *output) {
 	encoder.state.quant_scale_sum = 0;
 
 	for (int j = 0; ensure_av_data(decoder, 0, 1); j++) {
-		encode_frame_bs(&encoder, decoder->video_frames);
+		const void *video_frames = ring_buffer_get_head(&(decoder->video_frames), 0);
+		encode_frame_bs(&encoder, (const uint8_t *)video_frames);
 
-		retire_av_data(decoder, 0, 1);
+		ring_buffer_remove(&(decoder->video_frames), 1);
 		fwrite(encoder.state.frame_output, args->alignment, 1, output);
 
 		time_t t = get_elapsed_time();

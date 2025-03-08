@@ -32,30 +32,27 @@ freely, subject to the following restrictions:
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 #include "args.h"
+#include "ringbuf.h"
 
 typedef struct {
-	int video_frame_dst_size;
 	int audio_stream_index;
 	int video_stream_index;
-	AVFormatContext* format;
-	AVStream* audio_stream;
-	AVStream* video_stream;
-	AVCodecContext* audio_codec_context;
-	AVCodecContext* video_codec_context;
-	struct SwrContext* resampler;
-	struct SwsContext* scaler;
-	AVFrame* frame;
-
-	int sample_count_mul;
+	AVFormatContext *format;
+	AVStream *audio_stream;
+	AVStream *video_stream;
+	AVCodecContext *audio_codec_context;
+	AVCodecContext *video_codec_context;
+	struct SwrContext *resampler;
+	struct SwsContext *scaler;
+	AVFrame *frame;
+	void *resample_buffer;
 
 	double video_next_pts;
 } decoder_state_t;
 
 typedef struct {
-	int16_t *audio_samples;
-	int audio_sample_count;
-	uint8_t *video_frames;
-	int video_frame_count;
+	ring_buffer_t audio_samples;
+	ring_buffer_t video_frames;
 
 	int video_width;
 	int video_height;
@@ -76,5 +73,4 @@ enum {
 bool open_av_data(decoder_t *decoder, const args_t *args, int flags);
 bool poll_av_data(decoder_t *decoder);
 bool ensure_av_data(decoder_t *decoder, int needed_audio_samples, int needed_video_frames);
-void retire_av_data(decoder_t *decoder, int retired_audio_samples, int retired_video_frames);
 void close_av_data(decoder_t *decoder);

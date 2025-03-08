@@ -28,5 +28,6 @@ executable('psxavenc', [
 	'psxavenc/decoding.c',
 	'psxavenc/filefmt.c',
 	'psxavenc/main.c',
-	'psxavenc/mdec.c'
+	'psxavenc/mdec.c',
+	'psxavenc/ringbuf.c'
 ], dependencies: [libm_dep, ffmpeg, libpsxav_dep], install: true)
